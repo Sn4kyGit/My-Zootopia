@@ -33,7 +33,7 @@ def read_template(path: str) -> str:
         return f.read()
 
 def main() -> None:
-    # Pfade: JSON (Arg1, optional), Template (Arg2, optional), Output (Arg3, optional)
+    # Pfade: JSON (Arg1), Template (Arg2), Output (Arg3) – alle optional
     json_path = sys.argv[1] if len(sys.argv) > 1 else "animals_data.json"
     template_path = sys.argv[2] if len(sys.argv) > 2 else "animals_template.html"
     out_path = sys.argv[3] if len(sys.argv) > 3 else "animals.html"
@@ -41,21 +41,23 @@ def main() -> None:
     # (1) Template lesen
     template_html = read_template(template_path)
 
-    # JSON laden
+    # Daten laden
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-
     animals = iter_animals(data)
 
-    # (2) HTML-String mit <li class="cards__item">-Blöcken bauen
+    # (2) NEUE Serialisierung als <li class="cards__item"> … </li>
     output = ""
     for a in animals:
-        lines = []
-
-        # Name
+        # Titel (Name)
         name = get_ci(a, "name")
-        if name:
-            lines.append(f"Name: {html.escape(str(name))}<br/>")
+        title_html = (
+            f'      <div class="card__title">{html.escape(str(name))}</div>\n'
+            if name else ""
+        )
+
+        # Details (nur vorhandene Felder)
+        detail_lines: List[str] = []
 
         # Diet (top-level oder unter characteristics)
         diet = get_ci(a, "diet")
@@ -64,7 +66,7 @@ def main() -> None:
             if isinstance(ch, dict):
                 diet = get_ci(ch, "diet")
         if diet:
-            lines.append(f"Diet: {html.escape(str(diet))}<br/>")
+            detail_lines.append(f'<strong>Diet:</strong> {html.escape(str(diet))}<br/>')
 
         # Location (erste aus Liste oder String)
         locations = get_ci(a, "locations", "location")
@@ -74,7 +76,7 @@ def main() -> None:
         elif isinstance(locations, str) and locations.strip():
             first_location = locations.strip()
         if first_location:
-            lines.append(f"Location: {html.escape(str(first_location))}<br/>")
+            detail_lines.append(f'<strong>Location:</strong> {html.escape(str(first_location))}<br/>')
 
         # Type (top-level oder unter characteristics)
         typ = get_ci(a, "type")
@@ -83,15 +85,20 @@ def main() -> None:
             if isinstance(ch, dict):
                 typ = get_ci(ch, "type")
         if typ:
-            lines.append(f"Type: {html.escape(str(typ))}<br/>")
+            detail_lines.append(f'<strong>Type:</strong> {html.escape(str(typ))}<br/>')
 
-        # Nur wenn es mindestens eine Zeile gibt, ein <li> schreiben
-        if lines:
+        # Nur ein <li> schreiben, wenn mindestens Name ODER ein Detail existiert
+        if title_html or detail_lines:
             output += '    <li class="cards__item">\n'
-            output += '    ' + "\n    ".join(lines) + "\n"
+            if title_html:
+                output += title_html
+            if detail_lines:
+                output += '      <p class="card__text">\n'
+                output += '        ' + '\n        '.join(detail_lines) + '\n'
+                output += '      </p>\n'
             output += '    </li>\n'
 
-    # (3) Platzhalter im Template ersetzen
+    # (3) Platzhalter ersetzen
     final_html = template_html.replace(PLACEHOLDER, output)
 
     # (4) In neue Datei schreiben
