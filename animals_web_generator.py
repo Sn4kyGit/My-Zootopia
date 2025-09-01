@@ -1,15 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Generate animals.html by injecting serialized animal cards into a template.
+
+Steps:
+1) Read animals_template.html
+2) Load animals_data.json
+3) Serialize each animal via `serialize_animal`
+4) Replace placeholder and write animals.html
+"""
+
+from __future__ import annotations
+
+import html
 import json
 import sys
-import html
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
 
 PLACEHOLDER = "__REPLACE_ANIMALS_INFO__"
 
+
+# --------- Data helpers ---------
 def get_ci(d: Dict[str, Any], *keys: str) -> Optional[Any]:
-    """Case-insensitive Getter für mögliche Feldnamen."""
+    """Case-insensitive getter: returns value for the first matching key."""
     for k in keys:
         if k in d:
             return d[k]
@@ -20,92 +35,146 @@ def get_ci(d: Dict[str, Any], *keys: str) -> Optional[Any]:
             return v
     return None
 
+
 def iter_animals(data: Any) -> List[Dict[str, Any]]:
-    """Akzeptiert eine List[dict] oder ein Dict mit Schlüssel 'animals'."""
+    """Accepts a list of animals or a dict containing key 'animals'."""
     if isinstance(data, list):
         return [x for x in data if isinstance(x, dict)]
     if isinstance(data, dict) and isinstance(data.get("animals"), list):
         return [x for x in data["animals"] if isinstance(x, dict)]
     return []
 
-def read_template(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
 
-def main() -> None:
-    # Pfade: JSON (Arg1), Template (Arg2), Output (Arg3) – alle optional
-    json_path = sys.argv[1] if len(sys.argv) > 1 else "animals_data.json"
-    template_path = sys.argv[2] if len(sys.argv) > 2 else "animals_template.html"
-    out_path = sys.argv[3] if len(sys.argv) > 3 else "animals.html"
+# --------- IO helpers ---------
+def read_text(path: str | Path) -> str:
+    """Read a text file as UTF-8."""
+    return Path(path).read_text(encoding="utf-8")
 
-    # (1) Template lesen
-    template_html = read_template(template_path)
 
-    # Daten laden
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    animals = iter_animals(data)
+def write_text(path: str | Path, content: str) -> None:
+    """Write text to file as UTF-8."""
+    Path(path).write_text(content, encoding="utf-8")
 
-    # (2) NEUE Serialisierung als <li class="cards__item"> … </li>
-    output = ""
-    for a in animals:
-        # Titel (Name)
-        name = get_ci(a, "name")
-        title_html = (
-            f'      <div class="card__title">{html.escape(str(name))}</div>\n'
-            if name else ""
+
+# --------- Serialization ---------
+def serialize_animal(animal: Dict[str, Any]) -> str:
+    """
+    Serialize a single animal to the requested HTML structure:
+
+    <li class="cards__item">
+      <div class="card__title">Name</div>
+      <p class="card__text">
+        <strong>Diet:</strong> ...<br/>
+        <strong>Location:</strong> ...<br/>
+        <strong>Type:</strong> ...<br/>
+      </p>
+    </li>
+    """
+    # Title (Name)
+    name = get_ci(animal, "name")
+    title_html = (
+        f'  <div class="card__title">{html.escape(str(name))}</div>\n'
+        if name
+        else ""
+    )
+
+    # Details
+    details: List[str] = []
+
+    # Diet (top-level or nested in characteristics)
+    diet = get_ci(animal, "diet")
+    if not diet:
+        ch = get_ci(animal, "characteristics")
+        if isinstance(ch, dict):
+            diet = get_ci(ch, "diet")
+    if diet:
+        details.append(
+            f'<strong>Diet:</strong> {html.escape(str(diet))}<br/>'
         )
 
-        # Details (nur vorhandene Felder)
-        detail_lines: List[str] = []
+    # Location (first from list or string)
+    locations = get_ci(animal, "locations", "location")
+    first_location = None
+    if isinstance(locations, list) and locations:
+        first_location = locations[0]
+    elif isinstance(locations, str) and locations.strip():
+        first_location = locations.strip()
+    if first_location:
+        details.append(
+            f'<strong>Location:</strong> '
+            f'{html.escape(str(first_location))}<br/>'
+        )
 
-        # Diet (top-level oder unter characteristics)
-        diet = get_ci(a, "diet")
-        if not diet:
-            ch = get_ci(a, "characteristics")
-            if isinstance(ch, dict):
-                diet = get_ci(ch, "diet")
-        if diet:
-            detail_lines.append(f'<strong>Diet:</strong> {html.escape(str(diet))}<br/>')
+    # Type (top-level or nested in characteristics)
+    typ = get_ci(animal, "type")
+    if not typ:
+        ch = get_ci(animal, "characteristics")
+        if isinstance(ch, dict):
+            typ = get_ci(ch, "type")
+    if typ:
+        details.append(
+            f'<strong>Type:</strong> {html.escape(str(typ))}<br/>'
+        )
 
-        # Location (erste aus Liste oder String)
-        locations = get_ci(a, "locations", "location")
-        first_location = None
-        if isinstance(locations, list) and locations:
-            first_location = locations[0]
-        elif isinstance(locations, str) and locations.strip():
-            first_location = locations.strip()
-        if first_location:
-            detail_lines.append(f'<strong>Location:</strong> {html.escape(str(first_location))}<br/>')
+    # Build item only if we have at least a title or details
+    if not (title_html or details):
+        return ""
 
-        # Type (top-level oder unter characteristics)
-        typ = get_ci(a, "type")
-        if not typ:
-            ch = get_ci(a, "characteristics")
-            if isinstance(ch, dict):
-                typ = get_ci(ch, "type")
-        if typ:
-            detail_lines.append(f'<strong>Type:</strong> {html.escape(str(typ))}<br/>')
+    item = '  <li class="cards__item">\n'
+    if title_html:
+        item += title_html
+    if details:
+        item += "  <p class=\"card__text\">\n"
+        item += "    " + "\n    ".join(details) + "\n"
+        item += "  </p>\n"
+    item += "  </li>\n"
+    return item
 
-        # Nur ein <li> schreiben, wenn mindestens Name ODER ein Detail existiert
-        if title_html or detail_lines:
-            output += '    <li class="cards__item">\n'
-            if title_html:
-                output += title_html
-            if detail_lines:
-                output += '      <p class="card__text">\n'
-                output += '        ' + '\n        '.join(detail_lines) + '\n'
-                output += '      </p>\n'
-            output += '    </li>\n'
 
-    # (3) Platzhalter ersetzen
-    final_html = template_html.replace(PLACEHOLDER, output)
+def build_cards(animals: Iterable[Dict[str, Any]]) -> str:
+    """Serialize all animals and concatenate the list items."""
+    return "".join(serialize_animal(a) for a in animals if isinstance(a, dict))
 
-    # (4) In neue Datei schreiben
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(final_html)
 
-    print(f"✅ {out_path} geschrieben ({len(animals)} Tiere verarbeitet).")
+# --------- Main ---------
+def main() -> None:
+    # CLI args: json, template, out (all optional)
+    json_path = sys.argv[1] if len(sys.argv) > 1 else "animals_data.json"
+    template_path = (
+        sys.argv[2] if len(sys.argv) > 2 else "animals_template.html"
+    )
+    out_path = sys.argv[3] if len(sys.argv) > 3 else "animals.html"
+
+    # 1) Read template
+    try:
+        template_html = read_text(template_path)
+    except OSError as e:
+        print(f"Error reading template '{template_path}': {e}")
+        sys.exit(1)
+
+    # 2) Load data
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"Error reading JSON '{json_path}': {e}")
+        sys.exit(1)
+
+    animals = iter_animals(data)
+
+    # 3) Serialize animals as card items
+    cards_html = build_cards(animals)
+
+    # 4) Replace placeholder and write output
+    final_html = template_html.replace(PLACEHOLDER, cards_html)
+    try:
+        write_text(out_path, final_html)
+    except OSError as e:
+        print(f"Error writing '{out_path}': {e}")
+        sys.exit(1)
+
+    print(f"✅ Wrote {out_path} with {len(animals)} animals.")
+
 
 if __name__ == "__main__":
     main()
