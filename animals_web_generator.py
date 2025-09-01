@@ -3,12 +3,13 @@
 
 import json
 import sys
+import html
 from typing import Any, Dict, List, Optional
 
 PLACEHOLDER = "__REPLACE_ANIMALS_INFO__"
 
 def get_ci(d: Dict[str, Any], *keys: str) -> Optional[Any]:
-    # Case-insensitive Getter
+    """Case-insensitive Getter für mögliche Feldnamen."""
     for k in keys:
         if k in d:
             return d[k]
@@ -20,7 +21,7 @@ def get_ci(d: Dict[str, Any], *keys: str) -> Optional[Any]:
     return None
 
 def iter_animals(data: Any) -> List[Dict[str, Any]]:
-    # akzeptiert Liste oder { "animals": [...] }
+    """Akzeptiert eine List[dict] oder ein Dict mit Schlüssel 'animals'."""
     if isinstance(data, list):
         return [x for x in data if isinstance(x, dict)]
     if isinstance(data, dict) and isinstance(data.get("animals"), list):
@@ -32,7 +33,7 @@ def read_template(path: str) -> str:
         return f.read()
 
 def main() -> None:
-    # Pfade: JSON (Arg 1, optional), Template (Arg 2, optional), Output (Arg 3, optional)
+    # Pfade: JSON (Arg1, optional), Template (Arg2, optional), Output (Arg3, optional)
     json_path = sys.argv[1] if len(sys.argv) > 1 else "animals_data.json"
     template_path = sys.argv[2] if len(sys.argv) > 2 else "animals_template.html"
     out_path = sys.argv[3] if len(sys.argv) > 3 else "animals.html"
@@ -46,25 +47,26 @@ def main() -> None:
 
     animals = iter_animals(data)
 
-    # (2) String mit Tierdaten bauen
+    # (2) HTML-String mit <li class="cards__item">-Blöcken bauen
     output = ""
     for a in animals:
-        any_field = False
+        lines = []
 
+        # Name
         name = get_ci(a, "name")
         if name:
-            output += f"Name: {name}\n"
-            any_field = True
+            lines.append(f"Name: {html.escape(str(name))}<br/>")
 
+        # Diet (top-level oder unter characteristics)
         diet = get_ci(a, "diet")
         if not diet:
             ch = get_ci(a, "characteristics")
             if isinstance(ch, dict):
                 diet = get_ci(ch, "diet")
         if diet:
-            output += f"Diet: {diet}\n"
-            any_field = True
+            lines.append(f"Diet: {html.escape(str(diet))}<br/>")
 
+        # Location (erste aus Liste oder String)
         locations = get_ci(a, "locations", "location")
         first_location = None
         if isinstance(locations, list) and locations:
@@ -72,22 +74,24 @@ def main() -> None:
         elif isinstance(locations, str) and locations.strip():
             first_location = locations.strip()
         if first_location:
-            output += f"Location: {first_location}\n"
-            any_field = True
+            lines.append(f"Location: {html.escape(str(first_location))}<br/>")
 
+        # Type (top-level oder unter characteristics)
         typ = get_ci(a, "type")
         if not typ:
             ch = get_ci(a, "characteristics")
             if isinstance(ch, dict):
                 typ = get_ci(ch, "type")
         if typ:
-            output += f"Type: {typ}\n"
-            any_field = True
+            lines.append(f"Type: {html.escape(str(typ))}<br/>")
 
-        if any_field:
-            output += "\n"  # Leerzeile zwischen den Tieren
+        # Nur wenn es mindestens eine Zeile gibt, ein <li> schreiben
+        if lines:
+            output += '    <li class="cards__item">\n'
+            output += '    ' + "\n    ".join(lines) + "\n"
+            output += '    </li>\n'
 
-    # (3) Platzhalter ersetzen
+    # (3) Platzhalter im Template ersetzen
     final_html = template_html.replace(PLACEHOLDER, output)
 
     # (4) In neue Datei schreiben
